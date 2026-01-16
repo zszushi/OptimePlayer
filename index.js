@@ -2,23 +2,21 @@
  * @param {string | URL} url
  */
 function downloadFileFromUrl(url) {
-    return new Promise((resolve, reject) => {
-        let client = new XMLHttpRequest();
-        client.responseType = "arraybuffer";
-        client.open("GET", url);
-        client.onreadystatechange = () => {
-            if (client.status !== 404) {
-                if (client.response instanceof ArrayBuffer) {
-                    resolve(new Uint8Array(client.response));
-
-                }
-            } else {
-                reject();
-
-            }
-        };
-        client.send();
-    });
+  return new Promise((resolve, reject) => {
+    let client = new XMLHttpRequest();
+    client.responseType = "arraybuffer";
+    client.open("GET", url);
+    client.onreadystatechange = () => {
+      if (client.status !== 404) {
+        if (client.response instanceof ArrayBuffer) {
+          resolve(new Uint8Array(client.response));
+        }
+      } else {
+        reject();
+      }
+    };
+    client.send();
+  });
 }
 
 /**
@@ -26,820 +24,1472 @@ function downloadFileFromUrl(url) {
  * @param {string} url
  */
 function loadHtmlImageElementFromUrl(url) {
-    return new Promise((resolve, reject) => {
-        let htmlImageElement = new Image();
-        htmlImageElement.src = url;
-        htmlImageElement.onload = () => {
-            resolve(htmlImageElement);
-        };
-        htmlImageElement.onerror = () => reject();
-    });
+  return new Promise((resolve, reject) => {
+    let htmlImageElement = new Image();
+    htmlImageElement.src = url;
+    htmlImageElement.onload = () => {
+      resolve(htmlImageElement);
+    };
+    htmlImageElement.onerror = () => reject();
+  });
 }
 
 /**
  * @param {Uint8Array} data
  */
 async function loadNdsRom(data) {
-    let songPicker = document.querySelector(".song-picker");
-    if (songPicker == null) throw new Error();
-    while (songPicker.firstChild) {
-        songPicker.removeChild(songPicker.firstChild);
-    }
+  let pauseButton = document.querySelector("#pause-button");
 
-    console.log(`ROM size: ${data.length} bytes`);
+  let songPicker = document.querySelector(".song-picker");
+  if (songPicker == null) throw new Error();
+  while (songPicker.firstChild) {
+    songPicker.removeChild(songPicker.firstChild);
+  }
 
-    let sdats = Sdat.loadAllFromDataView(new DataView(data.buffer));
-    console.log('SDATS', sdats);
+  let nowPlayingIcon = document.createElement("img");
+  nowPlayingIcon.id = "now-playing-icon";
+  nowPlayingIcon.className = "now-playing-icon";
+  nowPlayingIcon.src = "assets/playing.png";
+  nowPlayingIcon.width = 16;
+  nowPlayingIcon.height = 16;
+  nowPlayingIcon.style.display = "none";
 
-    for (let i = 0; i < sdats.length; i++) {
-        const sdat = sdats[i];
+  console.log(`ROM size: ${data.length} bytes`);
 
-        if (sdat != null) {
-            if (sdats.length > 1)
-                songPicker.insertAdjacentHTML("beforeend", '<h2>SDAT ' + i + ':</h2>');
+  let sdats = Sdat.loadAllFromDataView(new DataView(data.buffer));
+  console.log("SDATS", sdats);
 
-            // Sequences
-            songPicker.insertAdjacentHTML("beforeend", '<h3>Sequences:</h3>');
-            for (const i of sdat.sseqList) {
-                let name = sdat.sseqIdNameDict.get(i);
-                let button = document.createElement('button');
-                    button.innerText = name ? `${name} (ID: ${i})` : `SSEQ_${i}`;
-                    button.style.textAlign = 'left';
-                    button.onclick = () => {
-                        playSeq(sdat, i);
-                    };
-                songPicker.appendChild(button);
-            }
+  for (let i = 0; i < sdats.length; i++) {
+    const sdat = sdats[i];
 
-            // Sequence Archives
-            for (const i of sdat.ssarList) {
-                let ssarName = sdat.ssarIdNameDict.get(i);
-                songPicker.insertAdjacentHTML("beforeend", ssarName ? '<h3>Sequence Archive ' + i + ' (' + ssarName + '):</h3>' : '<h3>Sequence Archive ' + i + ':</h3>');
-                let ssarSeqCount = sdat.getNumOfEntriesInSeqArc(i);
+    if (sdat != null) {
+      if (sdats.length > 1)
+        songPicker.insertAdjacentHTML(
+          "beforeend",
+          "<h2>SDAT " + (i + 1) + ":</h2>",
+        );
 
-                for (var ii = 0; ii < ssarSeqCount; ii++) {
-                    let sseqName = sdat.ssarSseqSymbols[i] ? sdat.ssarSseqSymbols[i].ssarSseqIdNameDict.get(ii) : null;
-                    let button = document.createElement('button');
-                        button.innerText = sseqName ? `${sseqName} (ID: ${ii})` : `SSEQ_${ii}`;;
-                        button.style.textAlign = 'left';
-                        let ssarId = i;
-                        let seqId = ii;
-                        button.onclick = () => {
-                            playSsarSeq(sdat, ssarId, seqId);
-                        };
-                    songPicker.appendChild(button);
-                }
-            }
+      // Sequences
+      if (sdat.sseqList.length !== 0)
+        songPicker.insertAdjacentHTML("beforeend", "<h3>Sequences:</h3>");
 
-            console.log("Searching for STRMs");
-            for (const [key, value] of sdat.fat) {
-                if (read32LE(value, 0) === 0x4D525453) {
-                    console.log(`file id:${key} is     STRM`);
+      for (const i of sdat.sseqList) {
+        let name = sdat.sseqIdNameDict.get(i);
+        let songDiv = document.createElement("div");
+        songDiv.className = "song-block";
+        let button = document.createElement("button");
+        button.className = "song-button";
+        button.innerText = name ? `${name} (ID: ${i})` : `SSEQ_${i}`;
+        button.onclick = () => {
+          playSeq(sdat, i);
 
-                    // playStrm(sdat.fat[key);
-                }
-            }
+          pauseButton.innerText = "Pause Sequence Player";
+          g_playbackPaused = false;
+
+          nowPlayingIcon.remove();
+          button.after(nowPlayingIcon);
+          nowPlayingIcon.style.display = "initial";
+
+          // Close overlay on mobile
+          songPicker.classList.remove("show");
+        };
+        songDiv.appendChild(button);
+        songPicker.appendChild(songDiv);
+      }
+
+      // Sequence Archives
+      for (const i of sdat.ssarList) {
+        let ssarName = sdat.ssarIdNameDict.get(i);
+        songPicker.insertAdjacentHTML(
+          "beforeend",
+          ssarName
+            ? "<h3>Sequence Archive " + i + " (" + ssarName + "):</h3>"
+            : "<h3>Sequence Archive " + i + ":</h3>",
+        );
+        let ssarSeqCount = sdat.getNumOfEntriesInSeqArc(i);
+
+        for (var ii = 0; ii < ssarSeqCount; ii++) {
+          let sseqName = sdat.ssarSseqSymbols[i]
+            ? sdat.ssarSseqSymbols[i].ssarSseqIdNameDict.get(ii)
+            : null;
+          let songDiv = document.createElement("span");
+          songDiv.className = "song-block";
+          let button = document.createElement("button");
+          button.className = "song-button";
+          button.innerText = sseqName
+            ? `${sseqName} (ID: ${ii})`
+            : `SSEQ_${ii}`;
+          button.style.textAlign = "left";
+          let ssarId = i;
+          let seqId = ii;
+          button.onclick = () => {
+            playSsarSeq(sdat, ssarId, seqId);
+
+            pauseButton.innerText = "Pause Sequence Player";
+            g_playbackPaused = false;
+
+            nowPlayingIcon.remove();
+            button.after(nowPlayingIcon);
+            nowPlayingIcon.style.display = "initial";
+
+            // Close overlay on mobile
+            songPicker.classList.remove("show");
+            const mobileSongListClose = document.querySelector("#mobile-song-list-close");
+            if (mobileSongListClose) mobileSongListClose.classList.remove("show");
+          };
+          songDiv.appendChild(button);
+          songPicker.appendChild(songDiv);
         }
-    }
+      }
 
-    let visualizerPane = document.querySelector("#visualizer-pane");
-    if (!(visualizerPane instanceof HTMLDivElement)) throw new Error();
-    visualizerPane.style.display = 'block';
+      // Streams
+      if (sdat.strmList.length !== 0)
+        songPicker.insertAdjacentHTML("beforeend", "<h3>Streams:</h3>");
+
+      for (const i of sdat.strmList) {
+        let strmName = sdat.strmIdNameDict.get(i);
+
+        let songDiv = document.createElement("span");
+        songDiv.className = "song-block";
+        let button = document.createElement("button");
+        button.className = "song-button";
+        button.innerText = strmName ? `${strmName} (ID: ${i})` : `STRM_${i}`;
+        button.style.textAlign = "left";
+        button.onclick = () => {
+          playStrm(sdat, i);
+
+          pauseButton.innerText = "Pause Sequence Player";
+          g_playbackPaused = false;
+
+          nowPlayingIcon.remove();
+          button.after(nowPlayingIcon);
+          nowPlayingIcon.style.display = "initial";
+
+          // Close overlay on mobile
+          songPicker.classList.remove("show");
+        };
+        songDiv.appendChild(button);
+        songPicker.appendChild(songDiv);
+      }
+    }
+  }
+
+  let visualizerPane = document.querySelector("#visualizer-pane");
+  if (!(visualizerPane instanceof HTMLDivElement)) throw new Error();
+  visualizerPane.style.display = "block";
 }
 
 window.onload = async () => {
-    console.log("Optime Player");
+  console.log("Optime Player");
 
+  let dropZone = document.querySelector("#drop-zone");
+  let filePicker = document.querySelector("#file-picker");
+  if (!(dropZone instanceof HTMLDivElement)) throw new Error();
+  if (!(filePicker instanceof HTMLInputElement)) throw new Error();
 
-
-    let dropZone = document.querySelector('#drop-zone');
-    let filePicker = document.querySelector('#file-picker');
+  dropZone.style.visibility = "hidden";
+  window.addEventListener("dragover", (e) => {
     if (!(dropZone instanceof HTMLDivElement)) throw new Error();
+    e.preventDefault();
+    console.log("File dragged over");
+    dropZone.style.visibility = "visible";
+  });
+  dropZone.addEventListener("dragleave", (e) => {
+    if (!(dropZone instanceof HTMLDivElement)) throw new Error();
+    e.preventDefault();
+    console.log("File drag leave");
+    dropZone.style.visibility = "hidden";
+  });
+  window.addEventListener("drop", (e) => {
+    e.preventDefault();
+    if (e.dataTransfer?.files[0] instanceof Blob) {
+      console.log("File dropped");
+
+      if (!(dropZone instanceof HTMLDivElement)) throw new Error();
+      dropZone.style.visibility = "hidden";
+
+      let reader = new FileReader();
+      reader.onload = function () {
+        if (this.result instanceof ArrayBuffer) {
+          loadNdsRom(new Uint8Array(this.result));
+        }
+      };
+      reader.readAsArrayBuffer(e.dataTransfer.files[0]);
+    }
+  });
+
+  filePicker.addEventListener("input", () => {
     if (!(filePicker instanceof HTMLInputElement)) throw new Error();
-
-    dropZone.style.visibility = 'hidden';
-    window.addEventListener('dragover', e => {
-        if (!(dropZone instanceof HTMLDivElement)) throw new Error();
-        e.preventDefault();
-        // console.log("File dragged over");
-        dropZone.style.visibility = 'visible';
-    });
-    dropZone.addEventListener('dragleave', e => {
-        if (!(dropZone instanceof HTMLDivElement)) throw new Error();
-        e.preventDefault();
-        // console.log("File drag leave");
-        dropZone.style.visibility = 'hidden';
-    });
-    window.addEventListener('drop', e => {
-        e.preventDefault();
-        if (e.dataTransfer?.files[0] instanceof Blob) {
-            console.log("File dropped");
-
-            if (!(dropZone instanceof HTMLDivElement)) throw new Error();
-            dropZone.style.visibility = 'hidden';
-
-            let reader = new FileReader();
-            reader.onload = function () {
-                if (this.result instanceof ArrayBuffer) {
-                    loadNdsRom(new Uint8Array(this.result));
-                }
-            };
-            reader.readAsArrayBuffer(e.dataTransfer.files[0]);
+    if (filePicker.files && filePicker.files.length > 0) {
+      let file = filePicker.files[0];
+      let reader = new FileReader();
+      reader.readAsArrayBuffer(file);
+      reader.onload = function () {
+        let result = reader.result;
+        if (result instanceof ArrayBuffer) {
+          loadNdsRom(new Uint8Array(result));
+        } else {
+          alert(
+            "Failed to read file! Probably a result of a lack of API support.",
+          );
         }
+      };
+    }
+  });
+
+  // Mobile song list toggle
+  const mobileSongListToggle = document.querySelector("#mobile-song-list-toggle");
+  const songPickerElement = document.querySelector(".song-picker");
+  const mobileSongListClose = document.querySelector("#mobile-song-list-close");
+
+  if (mobileSongListToggle) {
+    mobileSongListToggle.addEventListener("click", () => {
+      if (songPickerElement) {
+        songPickerElement.classList.add("show");
+        if (mobileSongListClose) mobileSongListClose.classList.add("show");
+      }
     });
+  }
 
-    filePicker.addEventListener("input", () => {
-        if (!(filePicker instanceof HTMLInputElement)) throw new Error();
-        if (filePicker.files && filePicker.files.length > 0) {
-            let file = filePicker.files[0];
-            let reader = new FileReader();
-            reader.readAsArrayBuffer(file);
-            reader.onload = function () {
-                let result = reader.result;
-                if (result instanceof ArrayBuffer) {
-                    loadNdsRom(new Uint8Array(result));
-                } else {
-                    alert("Failed to read file! Probably a result of a lack of API support.");
-                }
-            };
-        }
+  // Mobile song list close
+  if (mobileSongListClose) {
+    mobileSongListClose.addEventListener("click", () => {
+      if (songPickerElement) {
+        songPickerElement.classList.remove("show");
+        mobileSongListClose.classList.remove("show");
+      }
     });
+  }
 
-    let progressModal = document.getElementById("progress-modal");
-    let progressBar = document.getElementById("progress-bar");
-    let progressInfo = document.getElementById("progress-info");
-    const FADEOUT_LENGTH = 2; // in seconds 
-    const LOOP_COUNT = 2;
-    const SAMPLE_RATE = 32768;
+  let progressModal = document.getElementById("progress-modal");
+  let progressBar = document.getElementById("progress-bar");
+  let progressInfo = document.getElementById("progress-info");
+  const LOOP_FADEOUT_LENGTH = 2; // fadeout when song loops forever
+  const FIN_FADEOUT_LENGTH = 0.1; // 'fadeout' when song finishes
+  const LOOP_COUNT = 2;
+  const SAMPLE_RATE = 32768; // 48000, 32768
 
-    function getSseqLengthFromController(controller) {
-        let loop = 0;
-        let playing = true;
+  function getSseqLengthFromController(controller) {
+    let out = {};
+    let loop = 0;
+    let playing = true;
+    let timer = 0;
+    let ticks = 0;
 
-        let ticks = 0;
+    const SAMPLE_RATE = controller.synthesizers[0].sampleRate;
+    const TIMER_INC = 64 * 2728 * SAMPLE_RATE;
+    while (playing) {
+      // nintendo DS clock speed
+      timer += 33513982;
+      while (timer >= TIMER_INC) {
+        timer -= TIMER_INC;
 
-        // nintendo DS clock speed
-        while (true) {
-            controller.tick();
-            ticks++;
+        controller.tick();
+        ticks++;
 
-            if (controller.jumps > 0) {
-                controller.jumps = 0;
-                loop++;
+        // Fade out when we loop a certain number of times
+        if (controller.jumps > 0) {
+          controller.jumps = 0;
+          loop++;
 
-                if (loop === LOOP_COUNT) {
-                    break;
-                }
-            }
-
-            if (controller.fadingStart) {
-                break;
-            }
+          if (loop === LOOP_COUNT) {
+            playing = false;
+            out.fadeoutLength = LOOP_FADEOUT_LENGTH;
+            break;
+          }
         }
 
-        let time = ticks * (64 * 2728) / 33513982;
-        time += FADEOUT_LENGTH;
+        // Start to fade out when all tracks hit fin and all channels finish playing
+        if (
+          controller.sequence.status === SequenceStatus.AllTracksFinished &&
+          controller.noChannelsPlaying()
+        ) {
+          playing = false;
+          out.fadeoutLength = FIN_FADEOUT_LENGTH;
+          break;
+        }
+        // Or fade out when all tracks are mono and resting forever
+        if (
+          controller.sequence.status === SequenceStatus.AllTracksRestingForever
+        ) {
+          playing = false;
+          out.fadeoutLength = LOOP_FADEOUT_LENGTH;
+          break;
+        }
+      }
 
-        return time;
+      // advance instruments (necessary so that mono notes dont hang the controller)
+      for (let i = 0; i < 16; i++) {
+        controller.synthesizers[i].nextSample();
+      }
     }
 
-    /**
-     * @param {Sdat} sdat
-     * @param {string} name
-     */
-    async function renderAndDownloadSeq(sdat, id, subId, isSsar) {
-        progressModal.style.display = "block";
+    out.ticksBeforeFadeout = ticks;
+    out.time = (ticks * (64 * 2728)) / 33513982;
+    out.time += out.fadeoutLength;
 
-        await g_currentPlayer?.ctx.close();
-        g_currentController = null;
+    return out;
+  }
 
-        let controller = new Controller(SAMPLE_RATE);
-        let name;
-        let lengthS;
-        if (isSsar) {
-            controller.loadSsarSeq(sdat, id, subId);
+  /**
+   * @param {Sdat} sdat
+   * @param {string} name
+   */
+  // todo: why not optimize this by checking length (or when to fade) while gathering samples... its gotten pretty slow with accurate length calculation
+  async function renderAndDownloadSeq(sdat, id, subId, isSsar) {
+    progressModal.style.display = "block";
 
-            let name;
-            if (sdat.ssarSseqSymbols[id] && sdat.ssarSseqSymbols[id].ssarSseqIdNameDict.get(subId))
-                name = sdat.ssarSseqSymbols[id].ssarSseqIdNameDict.get(subId);
-            else
-                name = null;
+    if (g_currentController || g_currentPlayer) {
+      await g_currentPlayer?.ctx.close();
+    }
+    g_currentController = null;
+    g_currentPlayer = null;
 
-            let tmpController = new Controller(SAMPLE_RATE);
-            tmpController.loadSsarSeq(sdat, id, subId);
-            lengthS = getSseqLengthFromController(tmpController);
-        } 
-        else {
-            controller.loadSseq(sdat, id);
+    let rngSeed = g_enableCustomRNGSeed ? g_customRNGSeed : g_lastUsedRNGSeed;
 
-            let name;
-            if (sdat.sseqIdNameDict.get(id))
-                name = sdat.sseqIdNameDict.get(id);
-            else
-                name = null;
+    let controller = new Controller(SAMPLE_RATE);
+    let name;
+    let seqLength;
+    if (isSsar) {
+      controller.loadSsarSeq(sdat, id, subId);
+      controller.sequence.randomstate = rngSeed;
 
-            let tmpController = new Controller(SAMPLE_RATE);
-            tmpController.loadSseq(sdat, id);
-            lengthS = getSseqLengthFromController(tmpController);
+      if (
+        sdat.ssarSseqSymbols[id] &&
+        sdat.ssarSseqSymbols[id].ssarSseqIdNameDict.get(subId)
+      )
+        name = sdat.ssarSseqSymbols[id].ssarSseqIdNameDict.get(subId);
+      else name = `SSAR_${id}_SSEQ_${subId}`;
+
+      let tmpController = new Controller(10);
+      tmpController.loadSsarSeq(sdat, id, subId);
+      tmpController.sequence.randomstate = rngSeed;
+      seqLength = getSseqLengthFromController(tmpController);
+    } else {
+      controller.loadSseq(sdat, id);
+      controller.sequence.randomstate = rngSeed;
+
+      if (sdat.sseqIdNameDict.get(id)) name = sdat.sseqIdNameDict.get(id);
+      else name = `SSEQ_${id}`;
+
+      let tmpController = new Controller(10);
+      tmpController.loadSseq(sdat, id);
+      tmpController.sequence.randomstate = rngSeed;
+      seqLength = getSseqLengthFromController(tmpController);
+    }
+
+    console.log("Downloading sequence, name:", name);
+
+    let encoder = new WavEncoder(SAMPLE_RATE, 16);
+
+    let ticks = 0;
+    let sample = 0;
+    let fadingOut = false;
+    let fadeoutStartSample = 0;
+
+    let timer = 0;
+    let playing = true;
+
+    let startTimestamp = performance.now();
+
+    g_instrumentsAdvanced = 0;
+    g_samplesConsidered = 0;
+
+    // keep it under 480 seconds
+
+    console.log(seqLength, SAMPLE_RATE);
+    const CHUNK_SIZE = Math.floor(SAMPLE_RATE);
+
+    let intervalNum;
+
+    function renderChunk() {
+      for (let i = 0; i < CHUNK_SIZE; i++) {
+        if (!(playing && sample < SAMPLE_RATE * 480)) {
+          done();
+          return;
+        }
+        // nintendo DS clock speed
+        timer += 33513982;
+        const TIMER_INC = 64 * 2728 * SAMPLE_RATE;
+        while (timer >= TIMER_INC) {
+          timer -= TIMER_INC;
+          controller.tick();
+          ticks++;
+
+          if (ticks >= seqLength.ticksBeforeFadeout && !fadingOut) {
+            fadingOut = true;
+            fadeoutStartSample = sample + SAMPLE_RATE * seqLength.fadeoutLength;
+            console.log("Starting fadeout at sample: " + fadeoutStartSample);
+          }
         }
 
-        console.log('Downloading sequence, name:', name);
+        let fadeoutVolMul = 1;
 
-        let encoder = new WavEncoder(SAMPLE_RATE, 16);
+        if (fadingOut) {
+          let fadeoutSample = sample - fadeoutStartSample;
+          if (fadeoutSample >= 0) {
+            let fadeoutTime = fadeoutSample / SAMPLE_RATE;
+            let ratio = fadeoutTime / seqLength.fadeoutLength;
 
-        let sample = 0;
-        let fadingOut = false;
-        let fadeoutStartSample = 0;
-        let loop = 0;
-
-        let timer = 0;
-        let playing = true;
-
-        let startTimestamp = performance.now();
-
-        g_instrumentsAdvanced = 0;
-        g_samplesConsidered = 0;
-
-        // keep it under 480 seconds
-
-        console.log(lengthS);
-        const CHUNK_SIZE = Math.floor(SAMPLE_RATE);
-
-        let intervalNum;
-
-        function renderChunk() {
-            for (let i = 0; i < CHUNK_SIZE; i++) {
-                if (!(playing && sample < SAMPLE_RATE * 480)) {
-                    done();
-                    return;
-                }
-                // nintendo DS clock speed
-                timer += 33513982;
-                while (timer >= 64 * 2728 * SAMPLE_RATE) {
-                    timer -= 64 * 2728 * SAMPLE_RATE;
-
-                    controller.tick();
-                }
-
-                if (controller.jumps > 0) {
-                    controller.jumps = 0;
-                    loop++;
-
-                    if (loop === 2) {
-                        controller.fadingStart = true;
-                    }
-                }
-
-                if (controller.fadingStart) {
-                    controller.fadingStart = false;
-                    fadingOut = true;
-                    fadeoutStartSample = sample + SAMPLE_RATE * 2;
-                    console.log("Starting fadeout at sample: " + fadeoutStartSample);
-                }
-
-                let fadeoutVolMul = 1;
-
-                if (fadingOut) {
-                    let fadeoutSample = sample - fadeoutStartSample;
-                    if (fadeoutSample >= 0) {
-                        let fadeoutTime = fadeoutSample / SAMPLE_RATE;
-
-                        let ratio = (fadeoutTime) / FADEOUT_LENGTH;
-
-                        fadeoutVolMul = (1 - ratio);
-
-                        if (fadeoutVolMul <= 0) {
-                            playing = false;
-                        }
-                    }
-                }
-
-                let valL = 0;
-                let valR = 0;
-                for (let i = 0; i < 16; i++) {
-                    if (g_trackEnables[i]) {
-                        let synth = controller.synthesizers[i];
-                        synth.nextSample();
-                        valL += synth.valL;
-                        valR += synth.valR;
-                    }
-                }
-
-                encoder.addSample(valL * 0.5 * fadeoutVolMul, valR * 0.5 * fadeoutVolMul);
-
-                sample++;
+            fadeoutVolMul = 1 - ratio;
+            if (fadeoutVolMul <= 0) {
+              playing = false;
             }
-
-            let finishedTime = sample / SAMPLE_RATE;
-            // @ts-ignore
-            progressBar.value = Math.round((finishedTime / lengthS) * 100);
-            progressInfo.innerText = `${Math.round(finishedTime)} / ${Math.round(lengthS)} seconds`;
+          }
         }
 
-        intervalNum = setInterval(renderChunk, 0);
+        let valL = 0;
+        let valR = 0;
+        for (let i = 0; i < 16; i++) {
+          let synth = controller.synthesizers[i];
+          synth.nextSample();
+          if (g_trackEnables[i]) {
+            valL += synth.valL;
+            valR += synth.valR;
+          }
+        }
 
-        function done() {
-            clearInterval(intervalNum);
+        encoder.addSample(
+          valL * 0.5 * fadeoutVolMul,
+          valR * 0.5 * fadeoutVolMul,
+        );
 
-            progressModal.style.display = "none";
+        sample++;
+      }
 
-            let elapsed = (performance.now() - startTimestamp) / 1000;
+      let finishedTime = sample / SAMPLE_RATE;
+      // @ts-ignore
+      progressBar.value = Math.round((finishedTime / seqLength.time) * 100);
+      progressInfo.innerText = `${Math.round(Math.min(finishedTime, seqLength.time))} / ${Math.round(seqLength.time)} seconds`;
+    }
 
-            console.log(
-                `Rendered ${sample} samples in ${Math.round(elapsed * 10) / 10} seconds (${Math.round(sample / elapsed)} samples/s) (${Math.round(sample / elapsed / SAMPLE_RATE * 10) / 10}x realtime speed)
+    intervalNum = setInterval(renderChunk, 0);
+
+    function done() {
+      clearInterval(intervalNum);
+
+      progressModal.style.display = "none";
+
+      let elapsed = (performance.now() - startTimestamp) / 1000;
+
+      console.log(
+        `Rendered ${sample} samples in ${Math.round(elapsed * 10) / 10} seconds (${Math.round(sample / elapsed)} samples/s) (${Math.round((sample / elapsed / SAMPLE_RATE) * 10) / 10}x realtime speed)
                         Average instruments advanced per sample: ${Math.round((g_instrumentsAdvanced / sample) * 10) / 10}
                         Average samples considered per sample: ${Math.round((g_samplesConsidered / sample) * 10) / 10}
                         Stereo separation: ${g_enableStereoSeparation}
-                        `
-            );
+                        `,
+      );
 
-            downloadUint8Array(name + ".wav", encoder.encode());
+      downloadUint8Array(name + ".wav", encoder.encode());
+    }
+  }
+
+  /** @type {HTMLButtonElement} */
+  let pauseButton = document.querySelector("#pause-button");
+  pauseButton.onclick = () => {
+    if (g_currentPlayer === null) return;
+
+    g_playbackPaused = !g_playbackPaused;
+    if (g_currentController)
+      g_currentController.sequence.paused = g_playbackPaused;
+    if (currentFsVisController)
+      currentFsVisController.sequence.paused = g_playbackPaused;
+    if (g_playbackPaused) {
+      for (var i = 0; i < 16; i++)
+        for (var channel of g_currentController.sequence.tracks[i]
+          .activeChannels)
+          channel.adsrState = AdsrState.Release;
+      pauseButton.innerText = "Unpause Sequence Player";
+    } else {
+      pauseButton.innerText = "Pause Sequence Player";
+    }
+  };
+
+  /** @type {HTMLButtonElement} */
+  let restartSequenceButton = document.querySelector(
+    "#restart-sequence-button",
+  );
+  restartSequenceButton.onclick = () => {
+    if (g_currentPlayer === null) return;
+
+    pauseButton.innerText = "Pause Sequence Player";
+    g_playbackPaused = false;
+    if (g_currentlyPlayingIsSsar)
+      playSsarSeq(
+        g_currentlyPlayingSdat,
+        g_currentlyPlayingId,
+        g_currentlyPlayingSubId,
+      );
+    else playSeq(g_currentlyPlayingSdat, g_currentlyPlayingId);
+  };
+
+  // Visualizer
+  Promise.all([
+    loadHtmlImageElementFromUrl("assets/piano_section_1.png"),
+    loadHtmlImageElementFromUrl("assets/piano_section_2.png"),
+    loadHtmlImageElementFromUrl("assets/piano_section_3.png"),
+  ]).then(([section1Img, section2Img, section3Img]) => {
+    /** @type {HTMLCanvasElement} */
+    let visualizerCanvas = document.querySelector("#visualizer-canvas");
+    let ctx = visualizerCanvas.getContext("2d");
+
+    let sectionHeight = 43;
+    let whiteKeyWidth = 6;
+    let whiteKeyHeight = 31;
+    let blackKeyWidth = 3;
+    let blackKeyHeight = 17;
+
+    let midsections = 5;
+
+    /**
+     * @param {number} ofsX
+     * @param {number} ofsY
+     * @param {boolean} layer2
+     * @param {number} width
+     * @param {number} height
+     */
+    function createBackdropCanvas(ofsX, ofsY, layer2, width, height) {
+      let canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      let ctx = canvas.getContext("2d");
+
+      // 15 left-section keys + 5 * 12 mid-section keys + 13 right-section keys
+      // = 88 keys
+      for (let trackNum = 0; trackNum < 16; trackNum++) {
+        function drawKeys(black) {
+          // piano has 88 keys
+          for (let j = 0; j < 88; j++) {
+            let midiNote = j + 21; // lowest piano note is 21 on midi
+
+            // using the key of A as octave base
+            let octave = Math.floor(j / 12);
+            let keyInOctave = j % 12;
+
+            let keyNum = getKeyNum[keyInOctave];
+            let blackKey = isBlackKey[keyInOctave];
+
+            if (blackKey === black) {
+              let whiteKeyNum = octave * 7 + keyNum;
+
+              let fillStyle;
+              if (!blackKey) {
+                if (ctx.fillStyle !== fillStyle) {
+                  ctx.fillStyle = "#ffffff";
+                }
+
+                ctx.fillRect(
+                  ofsX + 3 + whiteKeyNum * whiteKeyWidth,
+                  ofsY + 3 + trackNum * sectionHeight,
+                  whiteKeyWidth,
+                  whiteKeyHeight,
+                );
+              } else {
+                if (ctx.fillStyle !== fillStyle) {
+                  ctx.fillStyle = "#dddddd";
+                }
+
+                ctx.fillRect(
+                  ofsX + 8 + whiteKeyNum * whiteKeyWidth,
+                  ofsY + 4 + trackNum * sectionHeight,
+                  blackKeyWidth,
+                  blackKeyHeight,
+                );
+              }
+            }
+          }
         }
+
+        if (!layer2) {
+          drawKeys(false); // draw white keys
+
+          ctx.drawImage(section1Img, ofsX, ofsY + trackNum * sectionHeight);
+
+          for (let j = 0; j < midsections; j++) {
+            ctx.drawImage(
+              section2Img,
+              ofsX + section1Img.width + j * section2Img.width,
+              ofsY + trackNum * sectionHeight,
+            );
+          }
+
+          ctx.drawImage(
+            section3Img,
+            ofsX + section1Img.width + midsections * section2Img.width,
+            ofsY + trackNum * sectionHeight,
+          );
+        } else {
+          drawKeys(true); // then draw black keys on top
+        }
+      }
+
+      return canvas;
     }
 
-    // Visualizer
-    Promise.all(
-        [
-            loadHtmlImageElementFromUrl("assets/piano_section_1.png"),
-            loadHtmlImageElementFromUrl("assets/piano_section_2.png"),
-            loadHtmlImageElementFromUrl("assets/piano_section_3.png")
-        ]
-    ).then(([section1Img, section2Img, section3Img]) => {
-        /** @type {HTMLCanvasElement} */
-        let visualizerCanvas = document.querySelector("#visualizer-canvas");
-        let ctx = visualizerCanvas.getContext('2d');
+    function drawVisualizerBackdrop(backdropCanvas) {
+      ctx.drawImage(backdropCanvas, 0, 0);
+    }
 
-        let sectionHeight = 43;
-        let whiteKeyWidth = 6;
-        let whiteKeyHeight = 31;
-        let blackKeyWidth = 3;
-        let blackKeyHeight = 17;
+    function drawVisualizer(ofsX, ofsY, black) {
+      for (let trackNum = 0; trackNum < 16; trackNum++) {
+        function drawKeys(black) {
+          // piano has 88 keys
+          for (let j = 0; j < 88; j++) {
+            let midiNote = j + 21; // lowest piano note is 21 on midi
 
-        let midsections = 5;
+            // using the key of A as octave base
+            let octave = Math.floor(j / 12);
+            let keyInOctave = j % 12;
 
-        /**
-         * @param {number} ofsX
-         * @param {number} ofsY
-         * @param {boolean} layer2
-         */
-        function createBackdropCanvas(ofsX, ofsY, layer2) {
-            let canvas = document.createElement("canvas");
-            canvas.width = 400;
-            canvas.height = 688;
-            let ctx = canvas.getContext("2d");
+            let keyNum = getKeyNum[keyInOctave];
+            let blackKey = isBlackKey[keyInOctave];
 
-            // 15 left-section keys + 5 * 12 mid-section keys + 13 right-section keys
-            // = 88 keys 
-            for (let trackNum = 0; trackNum < 16; trackNum++) {
-                function drawKeys(black) {
-                    // piano has 88 keys
-                    for (let j = 0; j < 88; j++) {
-                        let midiNote = j + 21; // lowest piano note is 21 on midi
+            if (blackKey === black) {
+              let whiteKeyNum = octave * 7 + keyNum;
 
-                        // using the key of A as octave base
-                        let octave = Math.floor(j / 12);
-                        let keyInOctave = j % 12;
+              let noteOn = g_currentController?.notesOn[trackNum][midiNote];
+              let noteOnKeyboard =
+                g_currentController?.notesOnKeyboard[trackNum][midiNote];
 
-                        let keyNum = getKeyNum[keyInOctave];
-                        let blackKey = isBlackKey[keyInOctave];
+              let pitchBendOffsetPx = 0;
+              if (
+                g_currentController &&
+                g_currentController.synthesizers[trackNum]
+              ) {
+                // finetune is in semitones. Scale it to a pixel offset.
+                // Assuming 1 semitone shift corresponds to half a whiteKeyWidth.
+                pitchBendOffsetPx =
+                  g_currentController.synthesizers[trackNum].finetune *
+                  (whiteKeyWidth / 2);
+              }
 
-                        if (blackKey === black) {
-                            let whiteKeyNum = octave * 7 + keyNum;
-
-                            let fillStyle;
-                            if (!blackKey) {
-                                if (ctx.fillStyle !== fillStyle) {
-                                    ctx.fillStyle = "#ffffff";
-                                }
-
-                                ctx.fillRect(ofsX + 3 + whiteKeyNum * whiteKeyWidth, ofsY + 3 + trackNum * sectionHeight, whiteKeyWidth, whiteKeyHeight);
-                            } else {
-                                if (ctx.fillStyle !== fillStyle) {
-                                    ctx.fillStyle = "#dddddd";
-                                }
-
-                                ctx.fillRect(ofsX + 8 + whiteKeyNum * whiteKeyWidth, ofsY + 4 + trackNum * sectionHeight, blackKeyWidth, blackKeyHeight);
-                            }
-                        }
-                    }
+              if (!blackKey) {
+                if (noteOn) {
+                  ctx.fillStyle = "#000000";
+                  if (noteOnKeyboard) {
+                    ctx.fillStyle = "#FF0000";
+                  }
+                  ctx.fillRect(
+                    ofsX + 3 + whiteKeyNum * whiteKeyWidth + pitchBendOffsetPx,
+                    ofsY + 3 + trackNum * sectionHeight,
+                    whiteKeyWidth,
+                    whiteKeyHeight,
+                  );
                 }
-
-                if (!layer2) {
-                    drawKeys(false); // draw white keys
-
-                    ctx.drawImage(section1Img, ofsX, ofsY + trackNum * sectionHeight);
-
-                    for (let j = 0; j < midsections; j++) {
-                        ctx.drawImage(section2Img, ofsX + section1Img.width + j * section2Img.width, ofsY + trackNum * sectionHeight);
-                    }
-
-                    ctx.drawImage(section3Img, ofsX + section1Img.width + midsections * section2Img.width, ofsY + trackNum * sectionHeight);
-                } else {
-
-                    drawKeys(true); // then draw black keys on top
+              } else {
+                if (noteOn) {
+                  ctx.fillStyle = "#000000";
+                  if (noteOnKeyboard) {
+                    ctx.fillStyle = "#FF0000";
+                  }
+                  ctx.fillRect(
+                    ofsX + 8 + whiteKeyNum * whiteKeyWidth + pitchBendOffsetPx,
+                    ofsY + 4 + trackNum * sectionHeight,
+                    blackKeyWidth,
+                    blackKeyHeight,
+                  );
                 }
+              }
             }
-
-            return canvas;
+          }
         }
 
-        function drawVisualizerBackdrop(backdropCanvas) {
-            ctx.drawImage(backdropCanvas, 0, 0);
+        if (!black) {
+          drawKeys(false); // draw white keys
+
+          if (trackNum === g_currentController?.activeKeyboardTrackNum) {
+            let x0 = ofsX + 0;
+            let y0 = ofsY + trackNum * sectionHeight;
+            let x1 =
+              ofsX +
+              section1Img.width +
+              midsections * section2Img.width +
+              section3Img.width;
+            let y1 = y0 + section3Img.height;
+
+            ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+          }
+
+          if (g_currentController) {
+            const synthesizer = g_currentController.synthesizers[trackNum];
+            if (synthesizer) {
+              const leftVolume = Math.abs(synthesizer.peakL || 0);
+              const rightVolume = Math.abs(synthesizer.peakR || 0);
+              const maxVolume = 1.0;
+
+              // Update peak hold
+              if (leftVolume > g_trackPeakHoldL[trackNum]) {
+                g_trackPeakHoldL[trackNum] = leftVolume;
+              } else {
+                g_trackPeakHoldL[trackNum] *= g_peakHoldDecay;
+              }
+              if (rightVolume > g_trackPeakHoldR[trackNum]) {
+                g_trackPeakHoldR[trackNum] = rightVolume;
+              } else {
+                g_trackPeakHoldR[trackNum] *= g_peakHoldDecay;
+              }
+
+              const meterWidth =
+                section1Img.width +
+                midsections * section2Img.width +
+                section3Img.width -
+                40;
+              const meterHeight = 8; // Increased from 5
+              const meterY =
+                ofsY + trackNum * sectionHeight + whiteKeyHeight + 5; // Increased from 2
+              const centerX = ofsX + 24 + meterWidth / 2;
+
+              const leftWidth = (leftVolume / maxVolume) * (meterWidth / 2);
+              const rightWidth = (rightVolume / maxVolume) * (meterWidth / 2);
+
+              const leftPeakWidth =
+                (g_trackPeakHoldL[trackNum] / maxVolume) * (meterWidth / 2);
+              const rightPeakWidth =
+                (g_trackPeakHoldR[trackNum] / maxVolume) * (meterWidth / 2);
+
+              ctx.fillStyle = "#BBBBBB"; // Original color
+              ctx.fillRect(centerX - leftWidth, meterY, leftWidth, meterHeight);
+              ctx.fillRect(centerX, meterY, rightWidth, meterHeight);
+
+              // Draw peak bars
+              ctx.fillStyle = "#FFFF44";
+              ctx.fillRect(centerX - leftPeakWidth, meterY, 2, meterHeight);
+              ctx.fillRect(centerX + rightPeakWidth - 2, meterY, 2, meterHeight);
+            }
+          }
+        } else {
+          drawKeys(true); // then draw black keys on top
         }
+      }
+    }
 
-        function drawVisualizer(ofsX, ofsY, black) {
-            for (let trackNum = 0; trackNum < 16; trackNum++) {
-                function drawKeys(black) {
-                    // piano has 88 keys
-                    for (let j = 0; j < 88; j++) {
-                        let midiNote = j + 21; // lowest piano note is 21 on midi
+    function drawMasterVolumeMeter() {
+      if (!g_currentController) return;
 
-                        // using the key of A as octave base
-                        let octave = Math.floor(j / 12);
-                        let keyInOctave = j % 12;
+      const height = 20;
+      const y = 0;
+      // Replicate track meter metrics
+      const ofsX = 74;
+      const meterWidth =
+        section1Img.width +
+        midsections * section2Img.width +
+        section3Img.width -
+        40;
+      const center = ofsX + 24 + meterWidth / 2;
 
-                        let keyNum = getKeyNum[keyInOctave];
-                        let blackKey = isBlackKey[keyInOctave];
+      ctx.clearRect(0, y, ctx.canvas.width, height);
 
-                        if (blackKey === black) {
-                            let whiteKeyNum = octave * 7 + keyNum;
+      const leftVolume = Math.abs(g_currentController.peakL || 0);
+      const rightVolume = Math.abs(g_currentController.peakR || 0);
 
-                            let noteOn = g_currentController?.notesOn[trackNum][midiNote];
-                            let noteOnKeyboard = g_currentController?.notesOnKeyboard[trackNum][midiNote];
-                            if (!blackKey) {
-                                if (noteOn) {
-                                    ctx.fillStyle = "#000000";
-                                    if (noteOnKeyboard) {
-                                        ctx.fillStyle = "#FF0000";
-                                    }
-                                    ctx.fillRect(ofsX + 3 + whiteKeyNum * whiteKeyWidth, ofsY + 3 + trackNum * sectionHeight, whiteKeyWidth, whiteKeyHeight);
-                                }
-                            } else {
-                                if (noteOn) {
-                                    ctx.fillStyle = "#000000";
-                                    if (noteOnKeyboard) {
-                                        ctx.fillStyle = "#FF0000";
-                                    }
-                                    ctx.fillRect(ofsX + 8 + whiteKeyNum * whiteKeyWidth, ofsY + 4 + trackNum * sectionHeight, blackKeyWidth, blackKeyHeight);
-                                }
-                            }
-                        }
-                    }
-                }
+      const maxVolume = 1.0;
 
-                if (!black) {
-                    drawKeys(false); // draw white keys
+      // Update peak hold
+      if (leftVolume > g_masterPeakHoldL) {
+        g_masterPeakHoldL = leftVolume;
+      } else {
+        g_masterPeakHoldL *= g_peakHoldDecay;
+      }
+      if (rightVolume > g_masterPeakHoldR) {
+        g_masterPeakHoldR = rightVolume;
+      } else {
+        g_masterPeakHoldR *= g_peakHoldDecay;
+      }
 
-                    if (trackNum === g_currentController?.activeKeyboardTrackNum) {
-                        let x0 = ofsX + 0;
-                        let y0 = ofsY + trackNum * sectionHeight;
-                        let x1 = ofsX + section1Img.width + midsections * section2Img.width + section3Img.width;
-                        let y1 = y0 + section3Img.height;
+      const leftWidth = (leftVolume / maxVolume) * (meterWidth / 2);
+      const rightWidth = (rightVolume / maxVolume) * (meterWidth / 2);
 
-                        ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
-                    }
+      const leftPeakWidth = (g_masterPeakHoldL / maxVolume) * (meterWidth / 2);
+      const rightPeakWidth = (g_masterPeakHoldR / maxVolume) * (meterWidth / 2);
 
-                } else {
-                    drawKeys(true); // then draw black keys on top
-                }
-            }
+      ctx.fillStyle = "#0f0"; // Green color for the volume bars
+      ctx.fillRect(center - leftWidth, y, leftWidth, height);
+      ctx.fillRect(center, y, rightWidth, height);
 
+      // Draw peak bars
+      ctx.fillStyle = "#FFFF44";
+      ctx.fillRect(center - leftPeakWidth, y, 2, height);
+      ctx.fillRect(center + rightPeakWidth - 2, y, 2, height);
+
+      // Draw center line
+      ctx.fillStyle = "#fff"; // White color for the center line
+      ctx.fillRect(center - 1, y, 2, height);
+    }
+
+    /**
+     * @param {number} ofsX
+     * @param {number} ofsY
+     */
+    function drawToggleButtons(ofsX, ofsY) {
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 1;
+      ctx.font = "14px HindSiliguri";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      for (let i = 0; i < 16; i++) {
+        if (g_trackEnables[i]) {
+          ctx.fillStyle = "#00cc00";
+        } else {
+          ctx.fillStyle = "#cc0000";
         }
+        ctx.fillRect(ofsX, ofsY + sectionHeight * i + 3, 70, 31);
+        ctx.strokeRect(ofsX, ofsY + sectionHeight * i + 3, 70, 31);
 
-        /**
-         * @param {number} ofsX
-         * @param {number} ofsY
-         */
-        function drawToggleButtons(ofsX, ofsY) {
-            ctx.strokeStyle = 'black';
-            ctx.lineWidth = 1;
-            for (let i = 0; i < 16; i++) {
-                if (g_trackEnables[i]) {
-                    ctx.fillStyle = '#00cc00';
-                } else {
-                    ctx.fillStyle = '#cc0000';
-                }
-                ctx.fillRect(ofsX, ofsY + sectionHeight * i + 3, 16, 31);
-                ctx.strokeRect(ofsX, ofsY + sectionHeight * i + 3, 16, 31);
-            }
+        ctx.fillStyle = "white";
+        ctx.fillText("Track " + i, ofsX + 5, ofsY + sectionHeight * i + 3 + 15.5);
+      }
+    }
+
+    let g_masterPeakHoldL = 0;
+    let g_masterPeakHoldR = 0;
+    let g_trackPeakHoldL = new Float32Array(16);
+    let g_trackPeakHoldR = new Float32Array(16);
+    let g_peakHoldDecay = 0.995;
+
+    const totalPianoWidth =
+      section1Img.width + midsections * section2Img.width + section3Img.width;
+
+    // Detect mobile and adjust canvas width
+    const isMobile = window.matchMedia('(max-width: 768px)').matches;
+    const requiredCanvasWidth = isMobile
+      ? Math.min(480, window.innerWidth - 20)
+      : 480; // Target width (padding added to the right)
+    const requiredCanvasHeight = 16 * sectionHeight + 50;
+
+    visualizerCanvas.width = requiredCanvasWidth;
+    visualizerCanvas.height = requiredCanvasHeight;
+
+    let backdropCanvas1 = createBackdropCanvas(
+      74,
+      22,
+      false,
+      requiredCanvasWidth,
+      requiredCanvasHeight,
+    );
+    let backdropCanvas2 = createBackdropCanvas(
+      74,
+      22,
+      true,
+      requiredCanvasWidth,
+      requiredCanvasHeight,
+    );
+    let lastVisualizerTime = 0;
+    const VISUALIZER_FPS = 30;
+    function animationFrameHandler(time) {
+      if (time >= lastVisualizerTime + 1 / VISUALIZER_FPS) {
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+        if (!g_currentController) {
+          ctx.globalAlpha = 0.25;
+        } else {
+          ctx.globalAlpha = 1;
         }
+        drawToggleButtons(2, 22);
+        drawVisualizerBackdrop(backdropCanvas1);
+        drawVisualizer(74, 22, false);
+        drawVisualizerBackdrop(backdropCanvas2);
+        drawVisualizer(74, 22, true);
+        drawMasterVolumeMeter();
+        lastVisualizerTime = time;
+      }
+      requestAnimationFrame(animationFrameHandler);
+    }
 
-        let backdropCanvas1 = createBackdropCanvas(24, 2, false);
-        let backdropCanvas2 = createBackdropCanvas(24, 2, true);
-        let lastVisualizerTime = 0;
-        const VISUALIZER_FPS = 30;
-        function animationFrameHandler(time) {
-            if (time >= lastVisualizerTime + 1 / VISUALIZER_FPS) {
-                ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    requestAnimationFrame(animationFrameHandler);
 
-                if (!g_currentController) {
-                    ctx.globalAlpha = 0.25;
-                } else {
-                    ctx.globalAlpha = 1;
-                }
-                drawToggleButtons(2, 2);
-                drawVisualizerBackdrop(backdropCanvas1);
-                drawVisualizer(24, 2, false);
-                drawVisualizerBackdrop(backdropCanvas2);
-                drawVisualizer(24, 2, true);
-                lastVisualizerTime = time;
-            }
-            requestAnimationFrame(animationFrameHandler);
+    class ClickRect {
+      constructor() {
+        // top left coordinates
+        this.x0 = 0;
+        this.y0 = 0;
+
+        // bottom right coordinates
+        this.x1 = 0;
+        this.y1 = 0;
+
+        this.trackIndex = -1; // Added to store the track index
+        this.callback = (isRightClick) => { }; // Modified to accept isRightClick
+      }
+    }
+
+    function toggleSoloTrack(trackNum) {
+      let isSoloed = true;
+      for (let i = 0; i < 16; i++) {
+        if (i === trackNum) {
+          if (!g_trackEnables[i]) {
+            isSoloed = false; // The clicked track is not enabled, so it's not soloed
+            break;
+          }
+        } else {
+          if (g_trackEnables[i]) {
+            isSoloed = false; // Another track is enabled, so it's not soloed
+            break;
+          }
         }
+      }
 
-        requestAnimationFrame(animationFrameHandler);
-
-        class ClickRect {
-            constructor() {
-                // top left coordinates
-                this.x0 = 0;
-                this.y0 = 0;
-
-                // bottom right coordinates
-                this.x1 = 0;
-                this.y1 = 0;
-
-                this.callback = () => { };
-            }
+      if (isSoloed) {
+        // If the clicked track is already soloed, unsolo all tracks
+        for (let i = 0; i < 16; i++) {
+          g_trackEnables[i] = true;
         }
-
-        /** @type {ClickRect[]} */
-        let clickRects = [];
-
-        function setupToggleButtons(ofsX, ofsY) {
-            for (let i = 0; i < 16; i++) {
-                let clickRect = new ClickRect();
-                clickRect.x0 = ofsX + 0;
-                clickRect.y0 = ofsY + sectionHeight * i + 3;
-                clickRect.x1 = clickRect.x0 + 16;
-                clickRect.y1 = clickRect.y0 + 31;
-
-                clickRect.callback = () => {
-                    g_trackEnables[i] = !g_trackEnables[i];
-                };
-
-                clickRects.push(clickRect);
-            }
+      } else {
+        // Solo the clicked track
+        for (let i = 0; i < 16; i++) {
+          g_trackEnables[i] = i === trackNum;
         }
-        setupToggleButtons(2, 0);
+      }
+    }
 
-        function setupTrackButtons(ofsX, ofsY) {
-            for (let trackNum = 0; trackNum < 16; trackNum++) {
-                let clickRect = new ClickRect();
-                clickRect.x0 = ofsX + 0;
-                clickRect.y0 = ofsY + trackNum * sectionHeight;
-                clickRect.x1 = ofsX + section1Img.width + midsections * section2Img.width + section3Img.width;
-                clickRect.y1 = ofsY + trackNum * sectionHeight + section3Img.height;
+    /** @type {ClickRect[]} */
+    let clickRects = [];
 
-                clickRect.callback = () => {
-                    if (g_currentController) {
-                        if (g_currentController.activeKeyboardTrackNum === trackNum) {
-                            g_currentController.activeKeyboardTrackNum = null;
-                        } else {
-                            g_currentController.activeKeyboardTrackNum = trackNum;
-                        }
-                    }
-                };
+    function setupToggleButtons(ofsX, ofsY) {
+      for (let i = 0; i < 16; i++) {
+        let clickRect = new ClickRect();
+        clickRect.x0 = ofsX + 0;
+        clickRect.y0 = ofsY + sectionHeight * i + 3;
+        clickRect.x1 = clickRect.x0 + 70;
+        clickRect.y1 = clickRect.y0 + 31;
+        clickRect.trackIndex = i; // Store the track index
 
-                clickRects.push(clickRect);
-            }
-        }
-        setupTrackButtons(24, 0);
-
-        visualizerCanvas.addEventListener('click', event => {
-            event.preventDefault();
-            let x = event.pageX - visualizerCanvas.offsetLeft - visualizerCanvas.clientLeft;
-            let y = event.pageY - visualizerCanvas.offsetTop - visualizerCanvas.clientTop;
-            for (let i of clickRects) {
-                if (x >= i.x0 && y >= i.y0 && x <= i.x1 && y <= i.y1) {
-                    i.callback();
-                }
-            }
-        });
-
-        visualizerCanvas.addEventListener('mousemove', event => {
-            let x = event.pageX - visualizerCanvas.offsetLeft - visualizerCanvas.clientLeft;
-            let y = event.pageY - visualizerCanvas.offsetTop - visualizerCanvas.clientTop;
-
-            let hovered = false;
-            for (let i of clickRects) {
-                if (x >= i.x0 && y >= i.y0 && x <= i.x1 && y <= i.y1) {
-                    hovered = true;
-                    break;
-                }
-            }
-
-            if (hovered) {
-                document.body.style.cursor = "pointer";
-            } else {
-                document.body.style.cursor = "default";
-            }
-        });
-
-        function keyboardPress(key, down) {
-            if (down) {
-                switch (key) {
-                    case "ArrowLeft":
-                    case "ArrowRight":
-                        let nextListIndex = g_currentlyPlayingIsSsar ? g_currentlyPlayingSubId : g_currentlyPlayingId;
-                        let listMaxIndex = g_currentlyPlayingIsSsar ? g_currentlyPlayingSdat.getNumOfEntriesInSeqArc(g_currentlyPlayingId) - 1 : g_currentlyPlayingSdat.sseqList.length - 1;
-                        if (key === "ArrowLeft") {
-                            if (nextListIndex === 0)
-                                break;
-                            nextListIndex--;
-                        } else if (key === "ArrowRight") {
-                            if (nextListIndex === listMaxIndex)
-                                break;
-                            nextListIndex++;
-                        }
-
-                        if (g_currentlyPlayingIsSsar)
-                            playSsarSeq(g_currentlyPlayingSdat, g_currentlyPlayingId, nextListIndex);
-                        else
-                            playSeq(g_currentlyPlayingSdat, nextListIndex);
-                        break;
-                    default:
-                        break;
-                }
-            }
-            if (g_currentController?.activeKeyboardTrackNum != null) {
-                let isNote = false;
-                let note = 0;
-
-                switch (key) {
-                    case "z": note = 60; isNote = true; break;
-                    case "s": note = 61; isNote = true; break;
-                    case "x": note = 62; isNote = true; break;
-                    case "d": note = 63; isNote = true; break;
-                    case "c": note = 64; isNote = true; break;
-                    case "v": note = 65; isNote = true; break;
-                    case "g": note = 66; isNote = true; break;
-                    case "b": note = 67; isNote = true; break;
-                    case "h": note = 68; isNote = true; break;
-                    case "n": note = 69; isNote = true; break;
-                    case "j": note = 70; isNote = true; break;
-                    case "m": note = 71; isNote = true; break;
-                    case ",": note = 72; isNote = true; break;
-                    case "l": note = 73; isNote = true; break;
-                    case ".": note = 74; isNote = true; break;
-                    case ";": note = 75; isNote = true; break;
-                    case "/": note = 76; isNote = true; break;
-
-                    case "q": note = 72; isNote = true; break;
-                    case "2": note = 73; isNote = true; break;
-                    case "w": note = 74; isNote = true; break;
-                    case "3": note = 75; isNote = true; break;
-                    case "e": note = 76; isNote = true; break;
-                    case "r": note = 77; isNote = true; break;
-                    case "5": note = 78; isNote = true; break;
-                    case "t": note = 79; isNote = true; break;
-                    case "6": note = 80; isNote = true; break;
-                    case "y": note = 81; isNote = true; break;
-                    case "7": note = 82; isNote = true; break;
-                    case "u": note = 83; isNote = true; break;
-                    case "i": note = 84; isNote = true; break;
-                    case "9": note = 85; isNote = true; break;
-                    case "o": note = 86; isNote = true; break;
-                    case "0": note = 87; isNote = true; break;
-                    case "p": note = 88; isNote = true; break;
-                    case "[": note = 89; isNote = true; break;
-                    case "=": note = 90; isNote = true; break;
-                    case "]": note = 91; isNote = true; break;
-                    default:
-                        break;
-                }
-
-                if (isNote) {
-                    event.preventDefault();
-
-                    if (note < 0) note = 0;
-                    if (note > 127) note = 127;
-
-                    console.log(note);
-                    if (down) {
-                        g_currentController.sequence.tracks[g_currentController.activeKeyboardTrackNum].sendMessage(true, MessageType.PlayNote, note, 127, 2000);
-                        g_currentController.notesOnKeyboard[g_currentController.activeKeyboardTrackNum][note] = 1;
-                    } else {
-                        for (let entry of g_currentController.activeNoteData) {
-                            if (entry.trackNum === g_currentController.activeKeyboardTrackNum && entry.midiNote === note) {
-                                entry.adsrState = AdsrState.Release;
-                                g_currentController.notesOnKeyboard[g_currentController.activeKeyboardTrackNum][note] = 0;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        let downKeys = {};
-
-        document.onkeydown = event => {
-            if (!downKeys[event.key]) {
-                keyboardPress(event.key, true);
-            }
-            downKeys[event.key] = true;
+        clickRect.callback = (isRightClick) => {
+          if (isRightClick) {
+            toggleSoloTrack(i);
+          } else {
+            g_trackEnables[i] = !g_trackEnables[i];
+          }
         };
 
-        document.onkeyup = event => {
-            keyboardPress(event.key, false);
-            downKeys[event.key] = false;
-        };
+        clickRects.push(clickRect);
+      }
+    }
+    setupToggleButtons(2, 20);
 
-        /** @type {HTMLButtonElement} */
-        let pauseButton = document.querySelector("#pause-button");
-        let paused = false;
-        pauseButton.onclick = () => {
-            paused = !paused;
-            if (g_currentController) g_currentController.sequence.paused = paused;
-            if (currentFsVisController) currentFsVisController.sequence.paused = paused;
-            if (paused) {
-                pauseButton.innerText = "Unpause Sequence Player";
-            } else {
-                pauseButton.innerText = "Pause Sequence Player";
+    function setupTrackButtons(ofsX, ofsY) {
+      for (let trackNum = 0; trackNum < 16; trackNum++) {
+        let clickRect = new ClickRect();
+        clickRect.x0 = ofsX + 0;
+        clickRect.y0 = ofsY + trackNum * sectionHeight;
+        clickRect.x1 =
+          ofsX +
+          section1Img.width +
+          midsections * section2Img.width +
+          section3Img.width;
+        clickRect.y1 = ofsY + trackNum * sectionHeight + section3Img.height;
+        clickRect.trackIndex = trackNum; // Store the track index
+
+        clickRect.callback = (isRightClick) => {
+          if (!isRightClick) {
+            // Only handle left-click for active keyboard track
+            if (g_currentController) {
+              if (g_currentController.activeKeyboardTrackNum === trackNum) {
+                g_currentController.activeKeyboardTrackNum = null;
+              } else {
+                g_currentController.activeKeyboardTrackNum = trackNum;
+              }
             }
+          }
         };
 
-        /** @type {HTMLButtonElement} */
-        let restartSequenceButton = document.querySelector("#restart-sequence-button");
-        restartSequenceButton.onclick = () => {
-            pauseButton.innerText = "Pause Sequence Player";
-            if (g_currentlyPlayingIsSsar)
-                playSsarSeq(g_currentlyPlayingSdat, g_currentlyPlayingId, g_currentlyPlayingSubId);
-            else
-                playSeq(g_currentlyPlayingSdat, g_currentlyPlayingId);
-        };
+        clickRects.push(clickRect);
+      }
+    }
+    setupTrackButtons(74, 20);
+
+    visualizerCanvas.addEventListener("click", (event) => {
+      event.preventDefault();
+      let rect = visualizerCanvas.getBoundingClientRect();
+      let x = event.pageX - rect.left;
+      let y = event.pageY - rect.top - window.scrollY;
+      console.log(x, y);
+      for (let i of clickRects) {
+        if (x >= i.x0 && y >= i.y0 && x <= i.x1 && y <= i.y1) {
+          i.callback(false); // Pass false for left-click
+        }
+      }
     });
 
-    /** @type {HTMLCanvasElement} */
-    let fsVisCanvas = document.querySelector("#fullscreen-vis-canvas");
-    let fsVisCtx = fsVisCanvas.getContext("2d");
-    (/** @type {HTMLButtonElement} */ (document.querySelector("#fullscreen-vis-button"))).onclick = e => {
-        showFsVis();
-        fsVisCanvas.requestFullscreen();
-    };
-
-    fsVisCanvas.onfullscreenchange = () => {
-        if (!document.fullscreenElement) {
-            hideFsVis();
+    visualizerCanvas.addEventListener("contextmenu", (event) => {
+      event.preventDefault(); // Prevent default context menu
+      let rect = visualizerCanvas.getBoundingClientRect();
+      let x = event.pageX - rect.left;
+      let y = event.pageY - rect.top - window.scrollY;
+      console.log(x, y);
+      for (let i of clickRects) {
+        if (x >= i.x0 && y >= i.y0 && x <= i.x1 && y <= i.y1) {
+          i.callback(true); // Pass true for right-click
         }
-    };
+      }
+    });
 
-    let fsVisVisible = false;
+    visualizerCanvas.addEventListener("mousemove", (event) => {
+      let x =
+        event.pageX - visualizerCanvas.offsetLeft - visualizerCanvas.clientLeft;
+      let y =
+        event.pageY - visualizerCanvas.offsetTop - visualizerCanvas.clientTop;
 
-    function showFsVis() {
-        fsVisVisible = true;
-        fsVisCanvas.style.display = "block";
+      let hovered = false;
+      for (let i of clickRects) {
+        if (x >= i.x0 && y >= i.y0 && x <= i.x1 && y <= i.y1) {
+          hovered = true;
+          break;
+        }
+      }
+
+      if (hovered) {
+        document.body.style.cursor = "pointer";
+      } else {
+        document.body.style.cursor = "default";
+      }
+    });
+
+    function keyboardPress(key, down) {
+      if (down) {
+        switch (key) {
+          case " ":
+            g_playbackPaused = !g_playbackPaused;
+            if (g_currentController)
+              g_currentController.sequence.paused = g_playbackPaused;
+            if (currentFsVisController)
+              currentFsVisController.sequence.paused = g_playbackPaused;
+            if (g_playbackPaused) {
+              pauseButton.innerText = "Unpause Sequence Player";
+            } else {
+              pauseButton.innerText = "Pause Sequence Player";
+            }
+            break;
+          case "r":
+          case "R":
+            if (fsVisVisible) {
+              if (g_currentPlayer === null) break;
+
+              pauseButton.innerText = "Pause Sequence Player";
+              g_playbackPaused = false;
+              if (g_currentlyPlayingIsSsar)
+                playSsarSeq(
+                  g_currentlyPlayingSdat,
+                  g_currentlyPlayingId,
+                  g_currentlyPlayingSubId,
+                );
+              else playSeq(g_currentlyPlayingSdat, g_currentlyPlayingId);
+            }
+            break;
+          case "ArrowLeft":
+          case "ArrowRight":
+            if (!g_currentlyPlayingSdat) break;
+
+            let nextListIndex = g_currentlyPlayingIsSsar
+              ? g_currentlyPlayingSubId
+              : g_currentlyPlayingSdat.sseqList.indexOf(g_currentlyPlayingId);
+            let listMaxIndex = g_currentlyPlayingIsSsar
+              ? g_currentlyPlayingSdat.getNumOfEntriesInSeqArc(
+                g_currentlyPlayingId,
+              ) - 1
+              : g_currentlyPlayingSdat.sseqList.length - 1;
+
+            let nowPlayingIcon = document.querySelector("#now-playing-icon");
+            let nextSongDiv;
+
+            if (key === "ArrowLeft") {
+              if (nextListIndex === 0) break;
+              nextListIndex--;
+              nextSongDiv = nowPlayingIcon.parentNode.previousSibling;
+            } else if (key === "ArrowRight") {
+              if (nextListIndex === listMaxIndex) break;
+              nextListIndex++;
+              nextSongDiv = nowPlayingIcon.parentNode.nextSibling;
+            }
+
+            if (g_currentlyPlayingIsSsar)
+              playSsarSeq(
+                g_currentlyPlayingSdat,
+                g_currentlyPlayingId,
+                nextListIndex,
+              );
+            else
+              playSeq(
+                g_currentlyPlayingSdat,
+                g_currentlyPlayingSdat.sseqList[nextListIndex],
+              );
+
+            g_playbackPaused = false;
+            pauseButton.innerHTML = "Pause Sequence Player";
+
+            nowPlayingIcon.remove();
+            nextSongDiv.appendChild(nowPlayingIcon);
+            break;
+          default:
+            break;
+        }
+      }
+      if (g_currentController?.activeKeyboardTrackNum != null) {
+        let isNote = false;
+        let note = 0;
+
+        switch (key) {
+          case "z":
+            note = 60;
+            isNote = true;
+            break;
+          case "s":
+            note = 61;
+            isNote = true;
+            break;
+          case "x":
+            note = 62;
+            isNote = true;
+            break;
+          case "d":
+            note = 63;
+            isNote = true;
+            break;
+          case "c":
+            note = 64;
+            isNote = true;
+            break;
+          case "v":
+            note = 65;
+            isNote = true;
+            break;
+          case "g":
+            note = 66;
+            isNote = true;
+            break;
+          case "b":
+            note = 67;
+            isNote = true;
+            break;
+          case "h":
+            note = 68;
+            isNote = true;
+            break;
+          case "n":
+            note = 69;
+            isNote = true;
+            break;
+          case "j":
+            note = 70;
+            isNote = true;
+            break;
+          case "m":
+            note = 71;
+            isNote = true;
+            break;
+          case ",":
+            note = 72;
+            isNote = true;
+            break;
+          case "l":
+            note = 73;
+            isNote = true;
+            break;
+          case ".":
+            note = 74;
+            isNote = true;
+            break;
+          case ";":
+            note = 75;
+            isNote = true;
+            break;
+          case "/":
+            note = 76;
+            isNote = true;
+            break;
+
+          case "q":
+            note = 72;
+            isNote = true;
+            break;
+          case "2":
+            note = 73;
+            isNote = true;
+            break;
+          case "w":
+            note = 74;
+            isNote = true;
+            break;
+          case "3":
+            note = 75;
+            isNote = true;
+            break;
+          case "e":
+            note = 76;
+            isNote = true;
+            break;
+          case "r":
+            note = 77;
+            isNote = true;
+            break;
+          case "5":
+            note = 78;
+            isNote = true;
+            break;
+          case "t":
+            note = 79;
+            isNote = true;
+            break;
+          case "6":
+            note = 80;
+            isNote = true;
+            break;
+          case "y":
+            note = 81;
+            isNote = true;
+            break;
+          case "7":
+            note = 82;
+            isNote = true;
+            break;
+          case "u":
+            note = 83;
+            isNote = true;
+            break;
+          case "i":
+            note = 84;
+            isNote = true;
+            break;
+          case "9":
+            note = 85;
+            isNote = true;
+            break;
+          case "o":
+            note = 86;
+            isNote = true;
+            break;
+          case "0":
+            note = 87;
+            isNote = true;
+            break;
+          case "p":
+            note = 88;
+            isNote = true;
+            break;
+          case "[":
+            note = 89;
+            isNote = true;
+            break;
+          case "=":
+            note = 90;
+            isNote = true;
+            break;
+          case "]":
+            note = 91;
+            isNote = true;
+            break;
+          default:
+            break;
+        }
+
+        if (isNote) {
+          event.preventDefault();
+
+          if (note < 0) note = 0;
+          if (note > 127) note = 127;
+
+          if (down) {
+            g_currentController.sequence.tracks[
+              g_currentController.activeKeyboardTrackNum
+            ].sendMessage(true, MessageType.PlayNote, note, 127, 2000);
+            g_currentController.notesOnKeyboard[
+              g_currentController.activeKeyboardTrackNum
+            ][note] = 1;
+          } else {
+            for (let entry of g_currentController.activeNoteData) {
+              if (
+                entry.trackNum === g_currentController.activeKeyboardTrackNum &&
+                entry.midiNote === note
+              ) {
+                entry.adsrState = AdsrState.Release;
+                g_currentController.notesOnKeyboard[
+                  g_currentController.activeKeyboardTrackNum
+                ][note] = 0;
+              }
+            }
+          }
+        }
+      }
     }
 
-    function hideFsVis() {
-        fsVisVisible = false;
-        fsVisCanvas.style.display = "none";
-    }
+    let downKeys = {};
 
-    function fsVisFrame(time) {
-        fsVisCanvas.width = window.innerWidth;
-        fsVisCanvas.height = window.innerHeight;
-        if (fsVisVisible) {
-            drawFsVis(fsVisCtx, time, 1);
-        }
-        requestAnimationFrame(fsVisFrame);
+    document.onkeydown = (event) => {
+      if (!downKeys[event.key]) {
+        keyboardPress(event.key, true);
+      }
+      downKeys[event.key] = true;
+    };
+
+    document.onkeyup = (event) => {
+      keyboardPress(event.key, false);
+      downKeys[event.key] = false;
+    };
+  });
+
+  /** @type {HTMLCanvasElement} */
+  let fsVisCanvas = document.querySelector("#fullscreen-vis-canvas");
+  let fsVisCtx = fsVisCanvas.getContext("2d");
+  /** @type {HTMLButtonElement} */ (
+    document.querySelector("#fullscreen-vis-button")
+  ).onclick = (e) => {
+    showFsVis();
+    fsVisCanvas.requestFullscreen();
+  };
+
+  fsVisCanvas.onfullscreenchange = () => {
+    if (!document.fullscreenElement) {
+      hideFsVis();
+    }
+  };
+
+  let fsVisVisible = false;
+
+  function showFsVis() {
+    fsVisVisible = true;
+    fsVisCanvas.style.display = "block";
+  }
+
+  function hideFsVis() {
+    fsVisVisible = false;
+    fsVisCanvas.style.display = "none";
+  }
+
+  function fsVisFrame(time) {
+    fsVisCanvas.width = window.innerWidth;
+    fsVisCanvas.height = window.innerHeight;
+    if (fsVisVisible) {
+      drawFsVis(fsVisCtx, time, 1);
     }
     requestAnimationFrame(fsVisFrame);
+  }
+  requestAnimationFrame(fsVisFrame);
 
-    (/** @type {HTMLButtonElement} */ (document.querySelector("#download-playing-button"))).onclick = e => {
-        renderAndDownloadSeq(g_currentlyPlayingSdat, g_currentlyPlayingId, g_currentlyPlayingSubId, g_currentlyPlayingIsSsar);
+  /** @type {HTMLButtonElement} */ (
+    document.querySelector("#download-playing-button")
+  ).onclick = (e) => {
+    renderAndDownloadSeq(
+      g_currentlyPlayingSdat,
+      g_currentlyPlayingId,
+      g_currentlyPlayingSubId,
+      g_currentlyPlayingIsSsar,
+    );
+  };
+
+  registerCheckbox("#stereo-separation", true, (checked) => {
+    g_enableStereoSeparation = checked;
+  });
+  registerCheckbox("#force-stereo-separation", true, (checked) => {
+    g_enableForceStereoSeparation = checked;
+  });
+  registerCheckbox("#accurate-mixing", false, (checked) => {
+    g_useAccurateMixing = checked;
+  });
+  registerCheckbox("#carry-over-redundant", false, (checked) => {
+    g_enableRedundantCarryOverBug = checked;
+  });
+  registerCheckbox("#use-custom-seed", false, (checked) => {
+    g_enableCustomRNGSeed = checked;
+    document.querySelector("#custom-seed").disabled = !checked;
+  });
+  registerTextbox("#custom-seed", 12345678, (value) => {
+    if (isNaN(value)) return;
+    g_customRNGSeed = parseInt(value);
+  });
+
+  let masterVolumeSlider = document.querySelector("#master-volume");
+  if (!(masterVolumeSlider instanceof HTMLInputElement)) throw new Error();
+  masterVolumeSlider.oninput = () => {
+    if (g_currentController) {
+      const volume = parseFloat(masterVolumeSlider.value) / 100;
+      g_currentController.masterVolume = volume;
+    }
+    if (g_currentPlayer) {
+      g_currentPlayer.gain.gain.value =
+        parseFloat(masterVolumeSlider.value) / 100;
+    }
+    localStorage.setItem("masterVolume", masterVolumeSlider.value);
+  };
+
+  if (localStorage.getItem("masterVolume")) {
+    masterVolumeSlider.value = localStorage.getItem("masterVolume");
+    if (g_currentController) {
+      const volume = parseFloat(masterVolumeSlider.value) / 100;
+      g_currentController.masterVolume = volume;
+    }
+    if (g_currentPlayer) {
+      g_currentPlayer.gain.gain.value =
+        parseFloat(masterVolumeSlider.value) / 100;
+    }
+  }
+
+  function applyCurrentVolumes() {
+    if (!g_currentController) return;
+
+    const masterVolume = parseFloat(masterVolumeSlider.value) / 100;
+    g_currentController.masterVolume = masterVolume;
+    if (g_currentPlayer) {
+      g_currentPlayer.gain.gain.value = masterVolume;
+    }
+
+    for (let i = 0; i < 16; i++) {
+      let trackVolumeSlider = document.querySelector(`#track-volume-${i}`);
+      if (trackVolumeSlider instanceof HTMLInputElement) {
+        const volume = parseFloat(trackVolumeSlider.value) / 100;
+        g_currentController.synthesizers[i].volume = volume;
+      }
+    }
+  }
+  // @ts-ignore
+  window.applyCurrentVolumes = applyCurrentVolumes;
+
+  for (let i = 0; i < 16; i++) {
+    let trackVolumeSlider = document.querySelector(`#track-volume-${i}`);
+    if (!(trackVolumeSlider instanceof HTMLInputElement)) throw new Error();
+    trackVolumeSlider.oninput = () => {
+      if (g_currentController) {
+        const volume = parseFloat(trackVolumeSlider.value) / 100;
+        g_currentController.synthesizers[i].volume = volume;
+      }
     };
+  }
 
-    registerCheckbox("#stereo-separation", true, checked => {
-        g_enableStereoSeparation = checked;
-    });
-    registerCheckbox("#force-stereo-separation", true, checked => {
-        g_enableForceStereoSeparation = checked;
-    });
+  registerDropdown("#tuning-system", (value) => {
+    let [tuning, tonic] = value.split(" ");
 
-    registerDropdown("#tuning-system", value => {
-        let [usePureTuning, tonic] = value.split(" ");
-
-        g_usePureTuning = usePureTuning;
-        g_pureTuningTonic = parseInt(tonic);
-    })
+    if (tuning === "accurate") {
+      g_useHardwareAccurateTuning = true;
+      g_usePureTuning = false;
+      g_pureTuningTonic = 0;
+    } else {
+      g_useHardwareAccurateTuning = false;
+      g_usePureTuning = tuning === "pure";
+      g_pureTuningTonic = g_usePureTuning ? parseInt(tonic) : 0;
+    }
+  });
 };
 
 /** @param {string} name */
 function loadDemo(name) {
-    downloadFileFromUrl("demos/" + name + ".sdat").then(data => {
-        loadNdsRom(data);
-    });
+  downloadFileFromUrl("demos/" + name + ".sdat").then((data) => {
+    loadNdsRom(data);
+  });
 }
 
 function registerCheckbox(selector, checked, callback) {
-    let element = document.querySelector(selector);
-    element.checked = checked;
-    callback(checked);
-    element.onchange = () => callback(element.checked);
+  let element = document.querySelector(selector);
+  element.checked = checked;
+  callback(checked);
+  element.onchange = () => callback(element.checked);
 }
 
 function registerDropdown(selector, callback) {
-    let element = document.querySelector(selector);
-    element.onchange = () => callback(element.value);
+  let element = document.querySelector(selector);
+  element.onchange = () => callback(element.value);
+}
+
+function registerTextbox(selector, value, callback) {
+  let element = document.querySelector(selector);
+  element.value = value;
+  callback(value);
+  element.onchange = () => callback(element.value);
 }
