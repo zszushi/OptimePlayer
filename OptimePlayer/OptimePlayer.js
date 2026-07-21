@@ -1419,6 +1419,8 @@ class SampleInstrument {
 
     this.output = 0;
 
+    this.trackNum = 0;
+
     Object.seal(this);
   }
 
