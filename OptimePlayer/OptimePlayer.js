@@ -38,6 +38,20 @@ let g_currentPlayer = null;
 /** @type {boolean[]} */
 let g_trackEnables = new Array(16).fill(true);
 
+/** @type {Float32Array[]} */
+let g_trackBuffers = new Array(16).fill(null).map(() => new Float32Array(1024));
+/** @type {number[]} */
+let g_trackBufferPos = new Array(16).fill(0);
+/** @type {Float32Array} */
+let g_masterPeakHoldL = [0];
+/** @type {Float32Array} */
+let g_masterPeakHoldR = [0];
+/** @type {Float32Array[]} */
+let g_trackPeakHoldL = new Array(16).fill(0);
+/** @type {Float32Array[]} */
+let g_trackPeakHoldR = new Array(16).fill(0);
+const g_peakHoldDecay = 0.995;
+
 /**
  * @param {string} name
  * @param {BlobPart} array
@@ -2459,7 +2473,7 @@ class SampleSynthesizer {
    * @param {number} volume
    * @param {number} meta
    */
-  play(sample, midiNote, volume, meta, isPsg, psgNoise) {
+  play(sample, midiNote, volume, meta, isPsg, psgNoise, trackNum) {
     let instr = this.instrs[this.playingIndex];
     if (instr.playing) {
       this.cutInstrument(this.playingIndex);
@@ -2476,6 +2490,9 @@ class SampleSynthesizer {
     instr.sampleT = 0;
     instr.resampleT = 0;
     instr.playing = true;
+    if (trackNum !== undefined) {
+      instr.trackNum = trackNum;
+    }
 
     let currentIndex = this.playingIndex;
 
@@ -2517,6 +2534,29 @@ class SampleSynthesizer {
     } else {
       this.valL = valL * this.volume;
       this.valR = valR * this.volume;
+    }
+
+    // Update oscilloscope buffer for this track (synthesizer index = track number)
+    const trackIndex = this.instrs[0]?.trackNum ?? 0;
+    if (trackIndex >= 0 && trackIndex < 16) {
+      const buf = trackOscilloscopeBuffers[trackIndex];
+      // Shift buffer and add new sample (mono mix for scope)
+      for (let i = 0; i < OSCILLOSCOPE_BUFFER_SIZE - 1; i++) {
+        buf[i] = buf[i + 1];
+      }
+      buf[OSCILLOSCOPE_BUFFER_SIZE - 1] = (this.valL + this.valR) * 0.5;
+      
+      // Update peak meters with decay
+      const peaks = trackOscilloscopePeaks[trackIndex];
+      const absL = Math.abs(this.valL);
+      const absR = Math.abs(this.valR);
+      if (absL > peaks.peakL) peaks.peakL = absL;
+      else peaks.peakL *= peaks.decay;
+      if (absR > peaks.peakR) peaks.peakR = absR;
+      else peaks.peakR *= peaks.decay;
+      
+      // Mark track as active
+      trackActivityCounter[trackIndex] = 60; // Show for ~1 second at 60fps
     }
 
     this.t++;
@@ -3730,6 +3770,7 @@ class Controller {
         this.sequence.ticksElapsed,
         isPsg,
         psgNoise,
+        trackNum,
       );
 
       this.notesOn[trackNum][rawMidiNote] = 1;
@@ -5387,9 +5428,28 @@ const fsVisPalette = [
   "#fa30a3",
 ];
 
+const TRACK_NAMES = [
+  "Track 0", "Track 1", "Track 2", "Track 3",
+  "Track 4", "Track 5", "Track 6", "Track 7",
+  "Track 8", "Track 9", "Track 10", "Track 11",
+  "Track 12", "Track 13", "Track 14", "Track 15"
+];
+
 let activeNoteTrackNums = new Int8Array(128).fill(-1);
 let lastTickTime = 0;
 let lastTicks = 0;
+
+// Oscilloscope buffer for each track (stores recent samples)
+const OSCILLOSCOPE_BUFFER_SIZE = 512;
+const trackOscilloscopeBuffers = [];
+const trackOscilloscopePeaks = [];
+for (let i = 0; i < 16; i++) {
+  trackOscilloscopeBuffers.push(new Float32Array(OSCILLOSCOPE_BUFFER_SIZE));
+  trackOscilloscopePeaks.push({ peakL: 0, peakR: 0, decay: 0.995 });
+}
+
+// Track activity tracking for oscilloscope display
+const trackActivityCounter = new Array(16).fill(0);
 
 /**
  @param {CanvasRenderingContext2D} ctx
@@ -5610,6 +5670,118 @@ function drawFsVis(ctx, time, noteAlpha) {
 
     drawKeys(false);
     drawKeys(true);
+
+    // Draw oscilloscopes for active tracks above the piano keyboard
+    // Layout: split the area above the keyboard into rows for each active track
+    const oscilloscopeAreaHeight = 0.65; // Top 65% of screen for oscilloscopes
+    const pianoAreaY = 1 - wKeyHeight;
+    
+    // Count active tracks
+    let activeTrackCount = 0;
+    for (let i = 0; i < 16; i++) {
+      if (trackActivityCounter[i] > 0 && g_trackEnables[i]) {
+        activeTrackCount++;
+      }
+    }
+    
+    if (activeTrackCount > 0) {
+      const trackHeight = oscilloscopeAreaHeight / Math.min(activeTrackCount, 8); // Max 8 rows visible
+      const meterWidth = 0.04; // 4% of screen width for meters
+      const scopeWidth = 1 - meterWidth - 0.02; // Remaining width for scope
+      
+      let currentY = 0.02; // Start from top with small margin
+      
+      for (let trackIdx = 0; trackIdx < 16; trackIdx++) {
+        if (trackActivityCounter[trackIdx] <= 0 || !g_trackEnables[trackIdx]) {
+          continue;
+        }
+        
+        // Decay activity counter
+        trackActivityCounter[trackIdx]--;
+        
+        const baseY = currentY;
+        const panelHeight = trackHeight - 0.01;
+        
+        // Draw panel background
+        ctx.fillStyle = "rgba(20, 20, 30, 0.8)";
+        ctx.fillRect(0.01, baseY, scopeWidth + meterWidth + 0.01, panelHeight);
+        
+        // Draw track name in top-left corner
+        ctx.font = "bold 14px monospace";
+        ctx.fillStyle = fsVisPalette[trackIdx];
+        ctx.textBaseline = "top";
+        ctx.fillText(TRACK_NAMES[trackIdx], 0.015, baseY + 0.005);
+        
+        // Draw oscilloscope waveform
+        const scopeY = baseY + 0.03;
+        const scopeH = panelHeight - 0.04;
+        const buf = trackOscilloscopeBuffers[trackIdx];
+        
+        ctx.strokeStyle = fsVisPalette[trackIdx];
+        ctx.lineWidth = 2 / ctx.canvas.height;
+        ctx.beginPath();
+        
+        for (let i = 0; i < OSCILLOSCOPE_BUFFER_SIZE; i++) {
+          const x = 0.01 + (i / OSCILLOSCOPE_BUFFER_SIZE) * scopeWidth;
+          const normalizedSample = buf[i]; // Already -1 to 1 range
+          const y = scopeY + scopeH * 0.5 - normalizedSample * scopeH * 0.4;
+          
+          if (i === 0) {
+            ctx.moveTo(x, y);
+          } else {
+            ctx.lineTo(x, y);
+          }
+        }
+        ctx.stroke();
+        
+        // Draw center line
+        ctx.strokeStyle = "rgba(100, 100, 100, 0.3)";
+        ctx.lineWidth = 1 / ctx.canvas.height;
+        ctx.beginPath();
+        ctx.moveTo(0.01, scopeY + scopeH * 0.5);
+        ctx.lineTo(0.01 + scopeWidth, scopeY + scopeH * 0.5);
+        ctx.stroke();
+        
+        // Draw volume meters (L/R peak meters like corrscope)
+        const meterX = 0.01 + scopeWidth + 0.005;
+        const meterH = panelHeight - 0.04;
+        const peaks = trackOscilloscopePeaks[trackIdx];
+        
+        // Left channel meter background
+        ctx.fillStyle = "rgba(50, 50, 50, 0.5)";
+        ctx.fillRect(meterX, scopeY, meterWidth * 0.45, meterH);
+        
+        // Right channel meter background
+        ctx.fillRect(meterX + meterWidth * 0.55, scopeY, meterWidth * 0.45, meterH);
+        
+        // Left channel peak level (green gradient)
+        const leftLevel = Math.min(peaks.peakL, 1.0);
+        const leftGrad = ctx.createLinearGradient(meterX, scopeY + meterH, meterX, scopeY);
+        leftGrad.addColorStop(0, "#00ff00");
+        leftGrad.addColorStop(0.7, "#ffff00");
+        leftGrad.addColorStop(1, "#ff0000");
+        ctx.fillStyle = leftGrad;
+        ctx.fillRect(meterX, scopeY + meterH * (1 - leftLevel), meterWidth * 0.45, meterH * leftLevel);
+        
+        // Right channel peak level
+        const rightLevel = Math.min(peaks.peakR, 1.0);
+        const rightGrad = ctx.createLinearGradient(meterX + meterWidth * 0.55, scopeY + meterH, meterX + meterWidth * 0.55, scopeY);
+        rightGrad.addColorStop(0, "#00ff00");
+        rightGrad.addColorStop(0.7, "#ffff00");
+        rightGrad.addColorStop(1, "#ff0000");
+        ctx.fillStyle = rightGrad;
+        ctx.fillRect(meterX + meterWidth * 0.55, scopeY + meterH * (1 - rightLevel), meterWidth * 0.45, meterH * rightLevel);
+        
+        // L/R labels
+        ctx.font = "10px monospace";
+        ctx.fillStyle = "#aaaaaa";
+        ctx.textAlign = "center";
+        ctx.fillText("L", meterX + meterWidth * 0.225, scopeY + meterH - 2);
+        ctx.fillText("R", meterX + meterWidth * 0.775, scopeY + meterH - 2);
+        
+        currentY += trackHeight;
+      }
+    }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
